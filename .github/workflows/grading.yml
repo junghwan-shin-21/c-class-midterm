@@ -1,95 +1,126 @@
-name: Grading Assignment Q-1
+name: C 프로그래밍 중간고사 (통합 채점)
 
 on: [push]
 
 jobs:
-  grade-assignment:
+  build-and-test:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout code
+      - name: 🔔 코드 체크아웃
         uses: actions/checkout@v3
 
-      - name: Compile the code
-        run: gcc main.c -o main 
-        
-      - name: Run Test Cases and Check Output
-        id: code_test
+      - name: ⚙️ 통합 채점 스크립트 실행 (100점 만점)
+        id: grading
         run: |
-          # 1. 테스트 입력 시퀀스
-          TEST_INPUT="21\n37\n45\n93\n0\n"
+          # ----------------------------------------------------
+          # 1. 초기 변수 설정
+          # ----------------------------------------------------
+          P1_SCORE=0
+          P2_SCORE=0
+          P1_FEEDBACK=""
+          P2_FEEDBACK=""
+          FINAL_SCORE=0
 
-          # 2. 예상 출력 정의 (프롬프트와 마지막 입력 '0'을 모두 제거한 순수한 결과만 남김)
-          EXPECTED_STATIC_OUTPUT_CONTENT="21: 비소수\n37: 소수\n45: 비소수\n93: 비소수\n===========\n종료\n소수 판별 횟수: 4회\n"
-          
-          # 3. 실제 코드 실행 및 출력 캡처
-          ACTUAL_OUTPUT=$(echo -e "$TEST_INPUT" | ./main)
-          echo "$ACTUAL_OUTPUT" > actual_output.txt
+          # Normalize function: Remove all whitespace (spaces, tabs, newlines, carriage returns) for strict comparison.
+          # This ensures that only the content/sequence matters, not formatting.
+          normalize_output() {
+            tr -d ' \t\n\r' < "$1"
+          }
 
-          # 4. 출력 후처리 (모든 '정수 입력: ' 프롬프트를 제거)
-          PROCESSED_OUTPUT=$(echo "$ACTUAL_OUTPUT" | sed 's/정수 입력: //g' | sed 's/\r//g')
-          
-          # 5. 출력 비교 로직 초기화
-          TEST_RESULT="fail"
-          GRADING_RESULT="output_fail" # 기본 실패 사유: 프로그램 출력 문제
-          EXEC_TIME_PATTERN="실행시간: [0-9]+\.[0-9]{6}초"
+          # ----------------------------------------------------
+          # 2. 문제 1 채점 (약수 출력 - main-1.c) - 50점
+          # ----------------------------------------------------
+          echo "### 🔍 [문제 1] 약수 출력 채점 시작 (main-1.c) ###"
 
-          # 5.1. 처리된 출력에서 정적 부분만 추출 (head -n 7)
-          ACTUAL_STATIC_LINES=$(echo "$PROCESSED_OUTPUT" | head -n 7)
-          
-          # 5.2. 파일로 저장 (EOF 일치)
-          echo -n "$ACTUAL_STATIC_LINES" > actual_static_output.txt
-          echo -n -e "$EXPECTED_STATIC_OUTPUT_CONTENT" > expected_static_output.txt
-
-          # 5.3. diff 비교
-          if diff -qaw expected_static_output.txt actual_static_output.txt; then
+          # 2-1. 컴파일 시도
+          if gcc main-1.c -o main1 2> compile_error_p1.txt; then
+            echo "✅ 문제 1: 컴파일 성공."
             
-            # diff 성공 시, 마지막 실행시간 형식만 검사
-            if echo "$ACTUAL_OUTPUT" | tail -n 1 | grep -E "$EXEC_TIME_PATTERN"; then
-              TEST_RESULT="success"
-              GRADING_RESULT="success" # 최종 성공
+            # 2-2. 예상 출력 파일 생성 (새로운 테스트 케이스 적용)
+            # 예상 출력은 순수하게 정답 내용만 포함합니다.
+            echo "24의 약수: 1 2 3 4 6 8 12 24" > expected_p1.txt
+            
+            # 2-3. 실행 및 원본 출력 캡처 (입력: 24로 변경)
+            echo "24" | ./main1 > actual_p1_raw.txt
+            
+            # 2-4. 출력 정리: 프롬프트 및 불필요한 선행 문자 제거 (출력 안정성 극대화)
+            # 정답 키워드("24의 약수:")를 포함하는 라인 중 마지막 라인을 추출하고,
+            # 해당 라인 시작 부분의 모든 문자열을 강제로 제거하여 정답 부분만 남김.
+            awk '/24의 약수:/' actual_p1_raw.txt | tail -n 1 | sed 's/^.*24의 약수:/24의 약수:/' > actual_p1.txt
+
+            # 2-5. 출력 비교
+            if [[ "$(normalize_output actual_p1.txt)" == "$(normalize_output expected_p1.txt)" ]]; then
+              P1_SCORE=50
+              P1_FEEDBACK="✅ 문제 1 (약수 출력): 통과 (50점)"
+            else
+              P1_FEEDBACK="❌ 문제 1 (약수 출력): 실패. (입력: 24)"
+              P1_FEEDBACK="${P1_FEEDBACK}\n  [학생 출력]: $(cat actual_p1.txt | tr '\n' ' ')"
+              P1_FEEDBACK="${P1_FEEDBACK}\n  [예상 출력]: $(cat expected_p1.txt | tr '\n' ' ')"
             fi
-            
           else
-            echo "::error::❌ Test Failed: Output Mismatch (diff check failed)."
-            echo "--- Diff Output ---"
-            diff expected_static_output.txt actual_static_output.txt
-            echo "-------------------"
-            # GRADING_RESULT는 이미 "output_fail"로 설정되어 있음
-          fi
-
-          # 6. 🚨 주석 개수 검사 (Fail-Fast Overwrite)
-          MIN_COMMENTS=4
-          # //, /*, */ 등의 주석 마커가 포함된 모든 줄을 계산합니다.
-          CURRENT_COMMENTS=$(grep -c -E '//|/\*|\*/' main.c)
-
-          if [ "$CURRENT_COMMENTS" -lt "$MIN_COMMENTS" ]; then
-            TEST_RESULT="fail" # 출력 비교 성공 여부와 관계없이 최종 실패
-            GRADING_RESULT="comment_fail" # 최종 실패 사유: 주석 부족
-            echo "::warning::⚠️ Code structure check failed: Comments too few ($CURRENT_COMMENTS / $MIN_COMMENTS)"
+            echo "❌ 문제 1: 컴파일 실패."
+            P1_FEEDBACK="❌ 문제 1 (약수 출력): 컴파일 실패. 코드를 확인하세요."
           fi
           
-          # 최종 결과 설정
-          echo "result=$TEST_RESULT" >> $GITHUB_OUTPUT
-          echo "grading_result=$GRADING_RESULT" >> $GITHUB_OUTPUT # 상세 사유 전달
-          echo "Test result: $TEST_RESULT"
+          # ----------------------------------------------------
+          # 3. 문제 2 채점 (합계 및 역순 출력 - main-2.c) - 50점
+          # ----------------------------------------------------
+          echo "### 🔍 [문제 2] 합계 및 역순 출력 채점 시작 (main-2.c) ###"
 
+          # 3-1. 컴파일 시도
+          if gcc main-2.c -o main2 2> compile_error_p2.txt; then
+            echo "✅ 문제 2: 컴파일 성공."
 
-      # ----------------------------------------------------
-      # 최종 Fail 보장 및 사유 보고 로직
-      - name: Final Grading and Failure Trigger
-        run: |
-          GRADING_RESULT="${{ steps.code_test.outputs.grading_result }}"
-          
-          if [ "$GRADING_RESULT" == "success" ]; then
-            echo "::notice::✔ 최종 채점 통과"
-          else
-            echo "::error::❌ 최종 채점 실패"
-            
-            if [ "$GRADING_RESULT" == "comment_fail" ]; then
-              echo "::error::🚨 실패 사유: 주석 부족 (main.c 파일에 최소 4개의 주석이 필요합니다.)"
-            elif [ "$GRADING_RESULT" == "output_fail" ]; then
-              echo "::error::🚨 실패 사유: 프로그램 동작/출력 불일치 (결과 값이 예상과 다릅니다.)"
+            # 3-2. 예상 출력 파일 생성 (새로운 테스트 케이스 적용)
+            # 예상 출력은 순수하게 정답 내용만 포함하며, 두 줄입니다.
+            echo "합계: 424" > expected_p2.txt
+            echo "역순: 90 1 27 68 48 23 95 4 56 12" >> expected_p2.txt
+
+            # 3-3. 실행 및 원본 출력 캡처 (입력: 12 56 ... 90으로 변경)
+            echo "12 56 4 95 23 48 68 27 1 90" | ./main2 > actual_p2_raw.txt
+
+            # 3-4. 출력 정리: 프롬프트 제거를 위해 정답 키워드를 포함하는 라인만 추출 및 정리 (출력 안정성 극대화)
+            # sed 명령을 연결하여 각 키워드 앞의 모든 문자를 제거
+            grep -E '합계:|역순:' actual_p2_raw.txt | sed 's/^.*합계:/합계:/' | sed 's/^.*역순:/역순:/' > actual_p2.txt
+
+            # 3-5. 출력 비교
+            if [[ "$(normalize_output actual_p2.txt)" == "$(normalize_output expected_p2.txt)" ]]; then
+              P2_SCORE=50
+              P2_FEEDBACK="✅ 문제 2 (합계 및 역순): 통과 (50점)"
+            else
+              P2_FEEDBACK="❌ 문제 2 (합계 및 역순): 실패. (입력: 12 56 4 95 23 48 68 27 1 90)"
+              P2_FEEDBACK="${P2_FEEDBACK}\n  [학생 출력]: $(cat actual_p2.txt | tr '\n' ' ')"
+              P2_FEEDBACK="${P2_FEEDBACK}\n  [예상 출력]: $(cat expected_p2.txt | tr '\n' ' ')"
             fi
-            
-            exit 1 
+          else
+            echo "❌ 문제 2: 컴파일 실패."
+            P2_FEEDBACK="❌ 문제 2 (합계 및 역순): 컴파일 실패. 코드를 확인하세요."
+          fi
+
+          # ----------------------------------------------------
+          # 4. 최종 점수 및 피드백 계산
+          # ----------------------------------------------------
+          FINAL_SCORE=$((P1_SCORE + P2_SCORE))
+          
+          # 최종 피드백 구성 (헤더 + P1 결과 + P2 결과)
+          FULL_FEEDBACK="--- 최종 채점 결과 (총 ${FINAL_SCORE}점 / 100점) ---\n"
+          FULL_FEEDBACK="${FULL_FEEDBACK}\n${P1_FEEDBACK}"
+          FULL_FEEDBACK="${FULL_FEEDBACK}\n${P2_FEEDBACK}"
+          
+          # 5. GitHub Classroom 출력 (점수 및 피드백 전달)
+          echo "점수: ${FINAL_SCORE} / 100"
+          echo "피드백:\n${FULL_FEEDBACK}"
+
+          echo "score=$FINAL_SCORE" >> "$GITHUB_OUTPUT"
+          echo "feedback<<EOF" >> "$GITHUB_OUTPUT"
+          echo -e "$FULL_FEEDBACK" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+          # 6. 🚨 최종 실패 보장 로직 (가장 중요)
+          # 점수가 100점이 아니면 GitHub Action 자체를 실패시켜
+          # GitHub Classroom에 0점 또는 실패로 정확하게 보고되도록 함.
+          if [ $FINAL_SCORE -ne 100 ]; then
+            echo "::error::🚨 최종 점수가 100점이 아니므로 채점 실패 처리합니다."
+            exit 1
           fi
