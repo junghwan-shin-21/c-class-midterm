@@ -1,2 +1,1 @@
-# c-class-week4
-C programming 4주차 template repo.
+C programming Midterm Test Repo
